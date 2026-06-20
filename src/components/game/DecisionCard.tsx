@@ -11,6 +11,7 @@ interface DecisionCardProps {
   showResult: boolean;
   selectedOptionId: string | null;
   onTimeUp?: () => void;
+  paused?: boolean;
 }
 
 export const DecisionCard = ({
@@ -20,6 +21,7 @@ export const DecisionCard = ({
   showResult,
   selectedOptionId,
   onTimeUp,
+  paused = false,
 }: DecisionCardProps) => {
   const [key, setKey] = useState(0);
 
@@ -57,6 +59,7 @@ export const DecisionCard = ({
                   initialTime={decision.timeLimit}
                   onTimeUp={handleTimeout}
                   autoStart={true}
+                  isPaused={paused}
                   size="md"
                 />
               </div>

@@ -103,10 +103,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       damageRisk: newDamage,
       complaintRisk: newComplaint,
       decisionHistory: [...state.decisionHistory, record],
-      showFeedback: true,
       lastFeedback: isTimeout ? '⏰ 时间到！' + option.consequence.feedback : option.consequence.feedback,
-      currentRandomEvent: null,
-      isPaused: false,
     });
   },
 

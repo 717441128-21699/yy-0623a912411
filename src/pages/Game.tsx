@@ -172,8 +172,6 @@ export const Game = () => {
     currentDecisionIndex;
   const progressPercentage = (completedDecisions / totalDecisions) * 100;
 
-  const activeDecision = currentRandomEvent || decision;
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-cold-50 via-white to-ice-50">
       <div className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-cold-100">
@@ -205,7 +203,7 @@ export const Game = () => {
         </div>
       </div>
 
-      <div className="container mx-auto px-4 py-6 max-w-4xl">
+      <div className={`container mx-auto px-4 py-6 max-w-4xl transition-opacity duration-300 ${currentRandomEvent ? 'opacity-50 pointer-events-none' : ''}`}>
         <SceneProgress scenes={level.scenes} currentSceneIndex={currentSceneIndex} />
 
         <StatusBar
@@ -228,16 +226,17 @@ export const Game = () => {
           </div>
 
           <DecisionCard
-            decision={activeDecision}
+            decision={decision}
             level={level}
-            onSelect={currentRandomEvent ? handleRandomEventOption : handleSelectOption}
+            onSelect={handleSelectOption}
             showResult={showFeedback}
             selectedOptionId={selectedOptionId}
             onTimeUp={handleTimeUp}
+            paused={!!currentRandomEvent}
           />
         </div>
 
-        {showNextButton && !currentRandomEvent && (
+        {showNextButton && (
           <div className="flex justify-end mt-6 animate-slide-up">
             <button
               onClick={handleNext}
