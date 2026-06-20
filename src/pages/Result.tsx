@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Home, RotateCcw, ChevronDown, ChevronUp, Trophy, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
+import { Home, RotateCcw, ChevronDown, ChevronUp, Trophy, AlertTriangle, CheckCircle, XCircle, Zap, Clock } from 'lucide-react';
 import { useGameStore, getBestScores, saveBestScore } from '../store/useGameStore';
 import { getLevelById } from '../data/levels';
 import { Gauge } from '../components/ui/Gauge';
@@ -19,8 +19,9 @@ export const Result = () => {
   const [result, setResult] = useState<GameResult | null>(null);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [isNewBest, setIsNewBest] = useState(false);
+  const [loadedFromStorage, setLoadedFromStorage] = useState(false);
 
-  const { calculateResult, startGame, resetGame } = useGameStore();
+  const { calculateResult, startGame, resetGame, getResultFromStorage, clearResultFromStorage } = useGameStore();
 
   useEffect(() => {
     if (!levelId) {
@@ -34,15 +35,30 @@ export const Result = () => {
       return;
     }
 
-    const gameResult = calculateResult();
+    let gameResult = calculateResult();
+
+    if (!gameResult.levelId || gameResult.decisionHistory.length === 0) {
+      const storedResult = getResultFromStorage();
+      if (storedResult && storedResult.levelId === levelId) {
+        gameResult = storedResult;
+        setLoadedFromStorage(true);
+      }
+    }
+
+    if (!gameResult.levelId || gameResult.decisionHistory.length === 0) {
+      navigate('/');
+      return;
+    }
+
     setResult(gameResult);
 
     const wasNewBest = saveBestScore(levelId, gameResult.complianceScore);
     setIsNewBest(wasNewBest);
-  }, [levelId, navigate, calculateResult]);
+  }, [levelId, navigate, calculateResult, getResultFromStorage]);
 
   const handleRetry = () => {
     if (levelId) {
+      clearResultFromStorage();
       resetGame();
       startGame(levelId);
       navigate(`/game/${levelId}`);
@@ -50,6 +66,7 @@ export const Result = () => {
   };
 
   const handleBackHome = () => {
+    clearResultFromStorage();
     resetGame();
     navigate('/');
   };
@@ -79,11 +96,21 @@ export const Result = () => {
 
   const level = getLevelById(levelId || '');
 
+  const allDecisions = level
+    ? [...level.scenes.flatMap(s => s.decisions), ...level.randomEvents]
+    : [];
+
+  const getCorrectOptionText = (decisionId: string) => {
+    const decision = allDecisions.find(d => d.id === decisionId);
+    return decision?.options.find(o => o.isCorrect)?.text || '无';
+  };
+
   const sceneGroups = result.decisionHistory.reduce((groups, record) => {
-    if (!groups[record.sceneName]) {
-      groups[record.sceneName] = [];
+    const groupName = record.isRandomEvent ? '⚡ 突发情况处理' : record.sceneName;
+    if (!groups[groupName]) {
+      groups[groupName] = [];
     }
-    groups[record.sceneName].push(record);
+    groups[groupName].push(record);
     return groups;
   }, {} as Record<string, DecisionRecord[]>);
 
@@ -189,97 +216,128 @@ export const Result = () => {
             📝 决策明细
           </h2>
           <div className="space-y-6">
-            {Object.entries(sceneGroups).map(([sceneName, records], sceneIndex) => (
-              <div key={sceneName} className="border-l-4 border-cold-500 pl-4">
-                <h3 className="text-lg font-bold text-cold-700 mb-4">
-                  {sceneName}
-                </h3>
-                <div className="space-y-3">
-                  {records.map((record, recordIndex) => {
-                    const isExpanded = expandedItems.has(record.decisionId);
-                    return (
-                      <div
-                        key={record.decisionId}
-                        className={`rounded-xl border-2 overflow-hidden transition-all ${
-                          record.isCorrect
-                            ? 'border-green-200 bg-green-50/50'
-                            : 'border-red-200 bg-red-50/50'
-                        }`}
-                      >
-                        <button
-                          onClick={() => toggleExpand(record.decisionId)}
-                          className="w-full p-4 flex items-start justify-between text-left hover:bg-black/5 transition-colors"
+            {Object.entries(sceneGroups).map(([sceneName, records], sceneIndex) => {
+              const isRandomGroup = sceneName === '⚡ 突发情况处理';
+              return (
+                <div
+                  key={sceneName}
+                  className={`border-l-4 pl-4 ${
+                    isRandomGroup ? 'border-orange-500' : 'border-cold-500'
+                  }`}
+                >
+                  <h3
+                    className={`text-lg font-bold mb-4 ${
+                      isRandomGroup ? 'text-orange-600' : 'text-cold-700'
+                    }`}
+                  >
+                    {sceneName}
+                  </h3>
+                  <div className="space-y-3">
+                    {records.map((record, recordIndex) => {
+                      const isExpanded = expandedItems.has(record.decisionId + record.timestamp);
+                      return (
+                        <div
+                          key={record.decisionId + record.timestamp}
+                          className={`rounded-xl border-2 overflow-hidden transition-all ${
+                            record.isRandomEvent
+                              ? record.isCorrect
+                                ? 'border-orange-200 bg-orange-50/50'
+                                : 'border-orange-300 bg-orange-50/70'
+                              : record.isCorrect
+                              ? 'border-green-200 bg-green-50/50'
+                              : 'border-red-200 bg-red-50/50'
+                          }`}
                         >
-                          <div className="flex items-start gap-3 flex-1">
-                            <div
-                              className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-                                record.isCorrect
-                                  ? 'bg-green-500 text-white'
-                                  : 'bg-red-500 text-white'
-                              }`}
-                            >
-                              {record.isCorrect ? (
-                                <CheckCircle size={18} />
-                              ) : (
-                                <XCircle size={18} />
-                              )}
-                            </div>
-                            <div className="flex-1">
-                              <p className="font-medium text-gray-800">
-                                {record.decisionQuestion}
-                              </p>
-                              <p
-                                className={`text-sm mt-1 ${
-                                  record.isCorrect ? 'text-green-600' : 'text-red-600'
+                          <button
+                            onClick={() => toggleExpand(record.decisionId + record.timestamp)}
+                            className="w-full p-4 flex items-start justify-between text-left hover:bg-black/5 transition-colors"
+                          >
+                            <div className="flex items-start gap-3 flex-1">
+                              <div
+                                className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+                                  record.isRandomEvent
+                                    ? record.isCorrect
+                                      ? 'bg-orange-500 text-white'
+                                      : 'bg-orange-600 text-white'
+                                    : record.isCorrect
+                                    ? 'bg-green-500 text-white'
+                                    : 'bg-red-500 text-white'
                                 }`}
                               >
-                                你的选择: {record.selectedOptionText}
-                              </p>
-                              {record.consequence.complianceScore !== 0 && (
-                                <p className="text-xs text-gray-500 mt-1">
-                                  合规分 {record.consequence.complianceScore > 0 ? '+' : ''}
-                                  {record.consequence.complianceScore}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                          {isExpanded ? (
-                            <ChevronUp size={20} className="text-gray-400 flex-shrink-0" />
-                          ) : (
-                            <ChevronDown size={20} className="text-gray-400 flex-shrink-0" />
-                          )}
-                        </button>
-                        {isExpanded && (
-                          <div className="px-4 pb-4 pt-0">
-                            <div className="p-4 bg-white rounded-xl border border-gray-200">
-                              <h4 className="font-bold text-gray-800 mb-2 flex items-center gap-2">
-                                💡 知识点
-                              </h4>
-                              <p className="text-gray-600 leading-relaxed">
-                                {record.consequence.explanation}
-                              </p>
-                              {!record.isCorrect && (
-                                <div className="mt-3 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-                                  <p className="text-yellow-700 text-sm">
-                                    <strong>正确做法：</strong>
-                                    {
-                                      level?.scenes
-                                        .flatMap(s => s.decisions)
-                                        .find(d => d.id === record.decisionId)
-                                        ?.options.find(o => o.isCorrect)?.text
-                                    }
+                                {record.isRandomEvent ? (
+                                  <Zap size={18} />
+                                ) : record.isCorrect ? (
+                                  <CheckCircle size={18} />
+                                ) : (
+                                  <XCircle size={18} />
+                                )}
+                              </div>
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="font-medium text-gray-800">
+                                    {record.decisionQuestion}
                                   </p>
+                                  {record.isRandomEvent && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-orange-500 text-white text-xs rounded-full font-medium">
+                                      <Zap size={12} />
+                                      突发
+                                    </span>
+                                  )}
+                                  {record.isTimeout && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-500 text-white text-xs rounded-full font-medium">
+                                      <Clock size={12} />
+                                      超时
+                                    </span>
+                                  )}
                                 </div>
-                              )}
+                                <p
+                                  className={`text-sm mt-1 ${
+                                    record.isCorrect ? 'text-green-600' : 'text-red-600'
+                                  }`}
+                                >
+                                  你的选择: {record.selectedOptionText}
+                                </p>
+                                {record.consequence.complianceScore !== 0 && (
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    合规分 {record.consequence.complianceScore > 0 ? '+' : ''}
+                                    {record.consequence.complianceScore}
+                                  </p>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                            {isExpanded ? (
+                              <ChevronUp size={20} className="text-gray-400 flex-shrink-0" />
+                            ) : (
+                              <ChevronDown size={20} className="text-gray-400 flex-shrink-0" />
+                            )}
+                          </button>
+                          {isExpanded && (
+                            <div className="px-4 pb-4 pt-0">
+                              <div className="p-4 bg-white rounded-xl border border-gray-200">
+                                <h4 className="font-bold text-gray-800 mb-2 flex items-center gap-2">
+                                  💡 知识点
+                                </h4>
+                                <p className="text-gray-600 leading-relaxed">
+                                  {record.consequence.explanation}
+                                </p>
+                                {!record.isCorrect && (
+                                  <div className="mt-3 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                                    <p className="text-yellow-700 text-sm">
+                                      <strong>正确做法：</strong>
+                                      {getCorrectOptionText(record.decisionId)}
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 

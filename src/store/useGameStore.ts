@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { GameStore, Option, Decision, DecisionRecord, GameResult } from '../types/game';
 import { getLevelById, levels } from '../data/levels';
 
+const GAME_RESULT_STORAGE_KEY = 'cold_chain_game_result';
+
 const initialState = {
   currentLevelId: null,
   currentSceneIndex: 0,
@@ -54,6 +56,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       consequence: option.consequence,
       timestamp: Date.now(),
       sceneName: scene.name,
+      isRandomEvent: false,
+      isTimeout: false,
     };
 
     set({
@@ -64,6 +68,45 @@ export const useGameStore = create<GameStore>((set, get) => ({
       decisionHistory: [...state.decisionHistory, record],
       showFeedback: true,
       lastFeedback: option.consequence.feedback,
+    });
+  },
+
+  selectRandomEventOption: (option: Option, isTimeout: boolean = false) => {
+    const state = get();
+    const level = state.getCurrentLevel();
+    const scene = state.getCurrentScene();
+    const randomEvent = state.currentRandomEvent;
+
+    if (!level || !scene || !randomEvent) return;
+
+    const newTemp = Math.max(-20, Math.min(40, state.temperature + option.consequence.temperatureChange));
+    const newCompliance = Math.max(0, Math.min(100, state.complianceScore + option.consequence.complianceScore));
+    const newDamage = Math.max(0, Math.min(100, state.damageRisk + option.consequence.damageRisk));
+    const newComplaint = Math.max(0, Math.min(100, state.complaintRisk + option.consequence.complaintRisk));
+
+    const record: DecisionRecord = {
+      decisionId: randomEvent.id,
+      decisionQuestion: randomEvent.question,
+      selectedOptionId: option.id,
+      selectedOptionText: option.text,
+      isCorrect: option.isCorrect,
+      consequence: option.consequence,
+      timestamp: Date.now(),
+      sceneName: scene.name,
+      isRandomEvent: true,
+      isTimeout,
+    };
+
+    set({
+      temperature: newTemp,
+      complianceScore: newCompliance,
+      damageRisk: newDamage,
+      complaintRisk: newComplaint,
+      decisionHistory: [...state.decisionHistory, record],
+      showFeedback: true,
+      lastFeedback: isTimeout ? '⏰ 时间到！' + option.consequence.feedback : option.consequence.feedback,
+      currentRandomEvent: null,
+      isPaused: false,
     });
   },
 
@@ -183,6 +226,36 @@ export const useGameStore = create<GameStore>((set, get) => ({
       keyLearnings,
       overallRating: rating,
     };
+  },
+
+  saveResultToStorage: () => {
+    const state = get();
+    const result = state.calculateResult();
+    if (result.levelId) {
+      try {
+        localStorage.setItem(GAME_RESULT_STORAGE_KEY, JSON.stringify(result));
+      } catch (e) {
+        console.error('Failed to save game result:', e);
+      }
+    }
+  },
+
+  getResultFromStorage: (): GameResult | null => {
+    try {
+      const stored = localStorage.getItem(GAME_RESULT_STORAGE_KEY);
+      return stored ? JSON.parse(stored) : null;
+    } catch (e) {
+      console.error('Failed to get game result:', e);
+      return null;
+    }
+  },
+
+  clearResultFromStorage: () => {
+    try {
+      localStorage.removeItem(GAME_RESULT_STORAGE_KEY);
+    } catch (e) {
+      console.error('Failed to clear game result:', e);
+    }
   },
 }));
 

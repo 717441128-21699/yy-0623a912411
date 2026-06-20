@@ -52,6 +52,8 @@ export interface DecisionRecord {
   consequence: Consequence;
   timestamp: number;
   sceneName: string;
+  isRandomEvent: boolean;
+  isTimeout: boolean;
 }
 
 export interface GameState {
@@ -84,6 +86,7 @@ export interface GameResult {
 export type GameStore = GameState & {
   startGame: (levelId: string) => void;
   selectOption: (option: Option) => void;
+  selectRandomEventOption: (option: Option, isTimeout?: boolean) => void;
   nextDecision: () => void;
   resetGame: () => void;
   setPaused: (paused: boolean) => void;
@@ -94,6 +97,9 @@ export type GameStore = GameState & {
   getCurrentDecision: () => Decision | undefined;
   getCurrentLevel: () => Level | undefined;
   calculateResult: () => GameResult;
+  saveResultToStorage: () => void;
+  getResultFromStorage: () => GameResult | null;
+  clearResultFromStorage: () => void;
 };
 
 export interface BestScore {

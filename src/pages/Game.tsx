@@ -14,6 +14,8 @@ export const Game = () => {
   const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
   const [showNextButton, setShowNextButton] = useState(false);
   const [randomEventTriggered, setRandomEventTriggered] = useState(false);
+  const [randomEventSelectedId, setRandomEventSelectedId] = useState<string | null>(null);
+  const [showRandomEventFeedback, setShowRandomEventFeedback] = useState(false);
 
   const {
     currentSceneIndex,
@@ -25,8 +27,10 @@ export const Game = () => {
     showFeedback,
     isGameOver,
     currentRandomEvent,
+    lastFeedback,
     startGame,
     selectOption,
+    selectRandomEventOption,
     nextDecision,
     resetGame,
     getCurrentScene,
@@ -35,6 +39,7 @@ export const Game = () => {
     triggerRandomEvent,
     closeRandomEvent,
     calculateResult,
+    saveResultToStorage,
   } = useGameStore();
 
   const level = getCurrentLevel();
@@ -60,9 +65,10 @@ export const Game = () => {
     if (isGameOver && levelId) {
       const result = calculateResult();
       saveBestScore(levelId, result.complianceScore);
+      saveResultToStorage();
       navigate(`/result/${levelId}`);
     }
-  }, [isGameOver, levelId, navigate, calculateResult]);
+  }, [isGameOver, levelId, navigate, calculateResult, saveResultToStorage]);
 
   useEffect(() => {
     if (
@@ -107,26 +113,40 @@ export const Game = () => {
   }, [nextDecision]);
 
   const handleTimeUp = useCallback(() => {
-    if (decision && !showFeedback) {
+    if (currentRandomEvent && !showRandomEventFeedback) {
+      const worstOption = currentRandomEvent.options.reduce((worst, option) => {
+        return option.consequence.complianceScore < worst.consequence.complianceScore
+          ? option
+          : worst;
+      }, currentRandomEvent.options[0]);
+      setRandomEventSelectedId(worstOption.id);
+      selectRandomEventOption(worstOption, true);
+      setShowRandomEventFeedback(true);
+    } else if (decision && !showFeedback) {
       const worstOption = decision.options.reduce((worst, option) => {
         return option.consequence.complianceScore < worst.consequence.complianceScore
           ? option
           : worst;
-      });
+      }, decision.options[0]);
       handleSelectOption(worstOption);
     }
-  }, [decision, showFeedback, handleSelectOption]);
+  }, [currentRandomEvent, decision, showFeedback, showRandomEventFeedback, selectRandomEventOption, handleSelectOption]);
 
   const handleRandomEventOption = useCallback(
     (option: Option) => {
       if (!currentRandomEvent) return;
-      selectOption(option);
-      closeRandomEvent();
-      setSelectedOptionId(null);
-      setShowNextButton(false);
+      setRandomEventSelectedId(option.id);
+      selectRandomEventOption(option, false);
+      setShowRandomEventFeedback(true);
     },
-    [currentRandomEvent, selectOption, closeRandomEvent]
+    [currentRandomEvent, selectRandomEventOption]
   );
+
+  const handleCloseRandomEventFeedback = useCallback(() => {
+    setRandomEventSelectedId(null);
+    setShowRandomEventFeedback(false);
+    closeRandomEvent();
+  }, [closeRandomEvent]);
 
   const handleBackHome = () => {
     navigate('/');
@@ -240,10 +260,21 @@ export const Game = () => {
               decision={currentRandomEvent}
               level={level}
               onSelect={handleRandomEventOption}
-              showResult={false}
-              selectedOptionId={null}
+              showResult={showRandomEventFeedback}
+              selectedOptionId={randomEventSelectedId}
               onTimeUp={handleTimeUp}
             />
+            {showRandomEventFeedback && (
+              <div className="mt-4 flex justify-end animate-slide-up">
+                <button
+                  onClick={handleCloseRandomEventFeedback}
+                  className="flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-cold-500 to-cold-600 text-white rounded-xl font-bold text-lg shadow-lg shadow-cold-500/30 hover:from-cold-600 hover:to-cold-700 transition-all duration-300"
+                >
+                  继续配送
+                  <ArrowRight size={24} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
