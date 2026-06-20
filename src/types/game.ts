@@ -70,6 +70,9 @@ export interface GameState {
   showFeedback: boolean;
   lastFeedback: string | null;
   currentRandomEvent: Decision | null;
+  practiceConfig: PracticeConfig | null;
+  practiceDecisions: Decision[];
+  practiceCurrentIndex: number;
 }
 
 export interface GameResult {
@@ -85,9 +88,12 @@ export interface GameResult {
 
 export type GameStore = GameState & {
   startGame: (levelId: string) => void;
+  startPractice: (config: PracticeConfig, decisions: Decision[], title?: string) => void;
   selectOption: (option: Option) => void;
   selectRandomEventOption: (option: Option, isTimeout?: boolean) => void;
+  selectPracticeOption: (option: Option, isTimeout?: boolean) => void;
   nextDecision: () => void;
+  nextPracticeDecision: () => void;
   resetGame: () => void;
   setPaused: (paused: boolean) => void;
   setShowFeedback: (show: boolean) => void;
@@ -96,7 +102,9 @@ export type GameStore = GameState & {
   getCurrentScene: () => Scene | undefined;
   getCurrentDecision: () => Decision | undefined;
   getCurrentLevel: () => Level | undefined;
+  getCurrentPracticeDecision: () => Decision | undefined;
   calculateResult: () => GameResult;
+  calculatePracticeResult: () => GameResult;
   saveResultToStorage: () => void;
   getResultFromStorage: () => GameResult | null;
   clearResultFromStorage: () => void;
@@ -108,3 +116,29 @@ export interface BestScore {
 }
 
 export type BestScores = Record<string, BestScore>;
+
+export interface WrongQuestion {
+  id: string;
+  decision: Decision;
+  levelId: string;
+  levelName: string;
+  sceneName: string;
+  sceneId: string;
+  isRandomEvent: boolean;
+  lastWrongAnswer: string;
+  lastWrongDate: string;
+  mastered: boolean;
+  wrongCount: number;
+  correctCount: number;
+}
+
+export type WrongQuestions = WrongQuestion[];
+
+export type PracticeMode = 'full' | 'scene' | 'random' | 'wrong';
+
+export interface PracticeConfig {
+  mode: PracticeMode;
+  levelId: string;
+  sceneId?: string;
+  title?: string;
+}

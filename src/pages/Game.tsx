@@ -1,21 +1,25 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { ArrowRight, Home } from 'lucide-react';
 import { useGameStore, saveBestScore } from '../store/useGameStore';
 import { getLevelById } from '../data/levels';
 import { SceneProgress } from '../components/game/SceneProgress';
 import { StatusBar } from '../components/game/StatusBar';
 import { DecisionCard } from '../components/game/DecisionCard';
-import { Option } from '../types/game';
+import { Option, PracticeConfig, PracticeMode, Decision } from '../types/game';
+import { addWrongQuestionsFromResult, markQuestionMastered, getWrongQuestions } from '../utils/wrongQuestions';
 
 export const Game = () => {
   const { levelId } = useParams<{ levelId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
   const [showNextButton, setShowNextButton] = useState(false);
   const [randomEventTriggered, setRandomEventTriggered] = useState(false);
   const [randomEventSelectedId, setRandomEventSelectedId] = useState<string | null>(null);
   const [showRandomEventFeedback, setShowRandomEventFeedback] = useState(false);
+  const [isPracticeMode, setIsPracticeMode] = useState(false);
 
   const {
     currentSceneIndex,
@@ -28,89 +32,180 @@ export const Game = () => {
     isGameOver,
     currentRandomEvent,
     lastFeedback,
+    practiceConfig,
+    practiceDecisions,
+    practiceCurrentIndex,
     startGame,
+    startPractice,
     selectOption,
     selectRandomEventOption,
+    selectPracticeOption,
     nextDecision,
+    nextPracticeDecision,
     resetGame,
     getCurrentScene,
     getCurrentDecision,
     getCurrentLevel,
+    getCurrentPracticeDecision,
     triggerRandomEvent,
     closeRandomEvent,
     calculateResult,
+    calculatePracticeResult,
     saveResultToStorage,
   } = useGameStore();
 
   const level = getCurrentLevel();
   const scene = getCurrentScene();
   const decision = getCurrentDecision();
+  const practiceDecision = getCurrentPracticeDecision();
+
+  const isPracticeRoute = location.pathname.startsWith('/practice');
 
   useEffect(() => {
-    if (levelId) {
-      const levelData = getLevelById(levelId);
-      if (!levelData) {
+    setIsPracticeMode(isPracticeRoute);
+  }, [isPracticeRoute]);
+
+  useEffect(() => {
+    if (!levelId) {
+      navigate('/');
+      return;
+    }
+    const levelData = getLevelById(levelId);
+    if (!levelData) {
+      navigate('/');
+      return;
+    }
+
+    if (isPracticeRoute) {
+      const mode = searchParams.get('mode') as PracticeMode | null;
+      const sceneId = searchParams.get('sceneId') || undefined;
+      const wrongQuestionIdsStr = searchParams.get('wrongIds') || '';
+
+      if (!mode) {
         navigate('/');
         return;
       }
+
+      let practiceTitle = '';
+      let selectedDecisions: Decision[] = [];
+
+      if (mode === 'random') {
+        practiceTitle = `${levelData.name} - 突发情况专项练习`;
+        selectedDecisions = levelData.randomEvents;
+      } else if (mode === 'scene' && sceneId) {
+        const targetScene = levelData.scenes.find(s => s.id === sceneId);
+        if (targetScene) {
+          practiceTitle = `${levelData.name} - ${targetScene.name}专项练习`;
+          selectedDecisions = targetScene.decisions;
+        }
+      } else if (mode === 'wrong') {
+        practiceTitle = `${levelData.name} - 错题专项练习`;
+        const wrongIds = wrongQuestionIdsStr.split(',').filter(Boolean);
+        const allDecisions = [...levelData.scenes.flatMap(s => s.decisions), ...levelData.randomEvents];
+        selectedDecisions = allDecisions.filter(d => wrongIds.includes(d.id));
+      }
+
+      if (selectedDecisions.length === 0) {
+        navigate('/');
+        return;
+      }
+
+      const config: PracticeConfig = {
+        mode,
+        levelId,
+        sceneId,
+        title: practiceTitle,
+      };
+      startPractice(config, selectedDecisions, practiceTitle);
+    } else {
       startGame(levelId);
     }
 
     return () => {
       resetGame();
     };
-  }, [levelId, navigate, startGame, resetGame]);
+  }, [levelId, navigate, startGame, startPractice, resetGame, isPracticeRoute, searchParams]);
 
   useEffect(() => {
     if (isGameOver && levelId) {
-      const result = calculateResult();
-      saveBestScore(levelId, result.complianceScore);
+      const result = practiceConfig
+        ? calculatePracticeResult()
+        : calculateResult();
+
+      if (!practiceConfig) {
+        saveBestScore(levelId, result.complianceScore);
+      }
+
+      const levelData = getLevelById(levelId);
+      if (levelData) {
+        addWrongQuestionsFromResult(result.decisionHistory, levelId, levelData);
+      }
+
+      if (practiceConfig?.mode === 'wrong') {
+        const correctIds = result.decisionHistory
+          .filter(r => r.isCorrect)
+          .map(r => r.decisionId);
+        correctIds.forEach(id => markQuestionMastered(`${levelId}_${id}`));
+      }
+
       saveResultToStorage();
       navigate(`/result/${levelId}`);
     }
-  }, [isGameOver, levelId, navigate, calculateResult, saveResultToStorage]);
+  }, [isGameOver, levelId, navigate, calculateResult, calculatePracticeResult, saveResultToStorage, practiceConfig]);
 
   useEffect(() => {
     if (
-      level &&
-      currentSceneIndex === 1 &&
-      currentDecisionIndex === 0 &&
-      !randomEventTriggered &&
-      level.randomEvents.length > 0
+      isPracticeMode ||
+      !level ||
+      currentSceneIndex !== 1 ||
+      currentDecisionIndex !== 0 ||
+      randomEventTriggered ||
+      level.randomEvents.length <= 0
     ) {
-      const randomIndex = Math.floor(Math.random() * level.randomEvents.length);
-      const randomEvent = level.randomEvents[randomIndex];
-
-      const timer = setTimeout(() => {
-        triggerRandomEvent(randomEvent);
-        setRandomEventTriggered(true);
-      }, 3000);
-
-      return () => clearTimeout(timer);
+      return;
     }
+
+    const randomIndex = Math.floor(Math.random() * level.randomEvents.length);
+    const randomEvent = level.randomEvents[randomIndex];
+
+    const timer = setTimeout(() => {
+      triggerRandomEvent(randomEvent);
+      setRandomEventTriggered(true);
+    }, 3000);
+
+    return () => clearTimeout(timer);
   }, [
     level,
     currentSceneIndex,
     currentDecisionIndex,
     randomEventTriggered,
     triggerRandomEvent,
+    isPracticeMode,
   ]);
 
   const handleSelectOption = useCallback(
     (option: Option) => {
       if (showFeedback) return;
       setSelectedOptionId(option.id);
-      selectOption(option);
+      if (isPracticeMode) {
+        selectPracticeOption(option);
+      } else {
+        selectOption(option);
+      }
       setShowNextButton(true);
     },
-    [showFeedback, selectOption]
+    [showFeedback, selectOption, selectPracticeOption, isPracticeMode]
   );
 
   const handleNext = useCallback(() => {
     setSelectedOptionId(null);
     setShowNextButton(false);
-    nextDecision();
-  }, [nextDecision]);
+    if (isPracticeMode) {
+      nextPracticeDecision();
+    } else {
+      nextDecision();
+    }
+  }, [nextDecision, nextPracticeDecision, isPracticeMode]);
 
   const handleTimeUp = useCallback(() => {
     if (currentRandomEvent && !showRandomEventFeedback) {
@@ -122,15 +217,24 @@ export const Game = () => {
       setRandomEventSelectedId(worstOption.id);
       selectRandomEventOption(worstOption, true);
       setShowRandomEventFeedback(true);
-    } else if (decision && !showFeedback) {
-      const worstOption = decision.options.reduce((worst, option) => {
-        return option.consequence.complianceScore < worst.consequence.complianceScore
-          ? option
-          : worst;
-      }, decision.options[0]);
-      handleSelectOption(worstOption);
+    } else {
+      const currentDec = isPracticeMode ? practiceDecision : decision;
+      if (currentDec && !showFeedback) {
+        const worstOption = currentDec.options.reduce((worst, option) => {
+          return option.consequence.complianceScore < worst.consequence.complianceScore
+            ? option
+            : worst;
+        }, currentDec.options[0]);
+        if (isPracticeMode) {
+          setSelectedOptionId(worstOption.id);
+          selectPracticeOption(worstOption, true);
+          setShowNextButton(true);
+        } else {
+          handleSelectOption(worstOption);
+        }
+      }
     }
-  }, [currentRandomEvent, decision, showFeedback, showRandomEventFeedback, selectRandomEventOption, handleSelectOption]);
+  }, [currentRandomEvent, decision, practiceDecision, showFeedback, showRandomEventFeedback, selectRandomEventOption, selectPracticeOption, handleSelectOption, isPracticeMode]);
 
   const handleRandomEventOption = useCallback(
     (option: Option) => {
@@ -152,7 +256,24 @@ export const Game = () => {
     navigate('/');
   };
 
-  if (!level || !scene || !decision) {
+  const currentDisplayDecision = isPracticeMode ? practiceDecision : decision;
+  const totalDecisions = isPracticeMode
+    ? practiceDecisions.length
+    : level?.scenes.reduce((sum, s) => sum + s.decisions.length, 0) || 0;
+  const completedDecisions = isPracticeMode
+    ? practiceCurrentIndex
+    : (level
+        ? level.scenes.slice(0, currentSceneIndex).reduce((sum, s) => sum + s.decisions.length, 0) + currentDecisionIndex
+        : 0);
+  const progressPercentage = totalDecisions > 0 ? ((completedDecisions + 1) / totalDecisions) * 100 : 0;
+  const isLastDecision = isPracticeMode
+    ? practiceCurrentIndex >= practiceDecisions.length - 1
+    : level
+      ? currentSceneIndex === level.scenes.length - 1 && currentDecisionIndex >= (scene?.decisions.length || 0) - 1
+      : false;
+  const displayTitle = practiceConfig?.title || level?.name || '';
+
+  if (!level || (!isPracticeMode && (!scene || !decision)) || (isPracticeMode && !practiceDecision)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-cold-50">
         <div className="text-center">
@@ -162,15 +283,6 @@ export const Game = () => {
       </div>
     );
   }
-
-  const totalDecisions = level.scenes.reduce(
-    (sum, s) => sum + s.decisions.length,
-    0
-  );
-  const completedDecisions =
-    level.scenes.slice(0, currentSceneIndex).reduce((sum, s) => sum + s.decisions.length, 0) +
-    currentDecisionIndex;
-  const progressPercentage = (completedDecisions / totalDecisions) * 100;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cold-50 via-white to-ice-50">
@@ -185,8 +297,13 @@ export const Game = () => {
               <span className="hidden md:inline">返回首页</span>
             </button>
             <div className="flex items-center gap-2">
+              {isPracticeMode ? (
+                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">
+                  专项练习
+                </span>
+              ) : null}
               <span className="text-2xl">{level.icon}</span>
-              <span className="font-bold text-gray-800">{level.name}</span>
+              <span className="font-bold text-gray-800">{displayTitle}</span>
             </div>
             <div className="w-24 text-right">
               <span className="text-sm text-gray-500">
@@ -197,14 +314,16 @@ export const Game = () => {
           <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
             <div
               className="h-full bg-gradient-to-r from-cold-400 to-cold-600 rounded-full transition-all duration-500"
-              style={{ width: `${progressPercentage}%` }}
+              style={{ width: `${Math.min(progressPercentage, 100)}%` }}
             />
           </div>
         </div>
       </div>
 
       <div className={`container mx-auto px-4 py-6 max-w-4xl transition-opacity duration-300 ${currentRandomEvent ? 'opacity-50 pointer-events-none' : ''}`}>
-        <SceneProgress scenes={level.scenes} currentSceneIndex={currentSceneIndex} />
+        {!isPracticeMode && level && scene && (
+          <SceneProgress scenes={level.scenes} currentSceneIndex={currentSceneIndex} />
+        )}
 
         <StatusBar
           level={level}
@@ -215,24 +334,28 @@ export const Game = () => {
         />
 
         <div className="mb-6">
-          <div className="bg-white rounded-2xl p-6 shadow-lg mb-6">
-            <div className="flex items-center gap-3 mb-4">
-              <span className="text-4xl">{scene.icon}</span>
-              <div>
-                <h2 className="text-2xl font-bold text-gray-800">{scene.name}</h2>
-                <p className="text-gray-600">{scene.description}</p>
+          {!isPracticeMode && scene && (
+            <div className="bg-white rounded-2xl p-6 shadow-lg mb-6">
+              <div className="flex items-center gap-3 mb-4">
+                <span className="text-4xl">{scene.icon}</span>
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-800">{scene.name}</h2>
+                  <p className="text-gray-600">{scene.description}</p>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           <DecisionCard
-            decision={decision}
+            decision={currentDisplayDecision!}
             level={level}
             onSelect={handleSelectOption}
             showResult={showFeedback}
             selectedOptionId={selectedOptionId}
             onTimeUp={handleTimeUp}
             paused={!!currentRandomEvent}
+            isPractice={isPracticeMode}
+            practiceMode={practiceConfig?.mode}
           />
         </div>
 
@@ -242,10 +365,7 @@ export const Game = () => {
               onClick={handleNext}
               className="flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-cold-500 to-cold-600 text-white rounded-xl font-bold text-lg shadow-lg shadow-cold-500/30 hover:from-cold-600 hover:to-cold-700 transition-all duration-300 hover:shadow-xl hover:-translate-y-1"
             >
-              {currentSceneIndex === level.scenes.length - 1 &&
-              currentDecisionIndex === scene.decisions.length - 1
-                ? '查看结果'
-                : '继续'}
+              {isLastDecision ? '查看结果' : '继续'}
               <ArrowRight size={24} />
             </button>
           </div>

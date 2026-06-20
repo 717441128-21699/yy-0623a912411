@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { GameStore, Option, Decision, DecisionRecord, GameResult } from '../types/game';
+import { GameStore, Option, Decision, DecisionRecord, GameResult, PracticeConfig } from '../types/game';
 import { getLevelById, levels } from '../data/levels';
 
 const GAME_RESULT_STORAGE_KEY = 'cold_chain_game_result';
@@ -18,6 +18,9 @@ const initialState = {
   showFeedback: false,
   lastFeedback: null,
   currentRandomEvent: null,
+  practiceConfig: null,
+  practiceDecisions: [],
+  practiceCurrentIndex: 0,
 };
 
 export const useGameStore = create<GameStore>((set, get) => ({
@@ -31,6 +34,31 @@ export const useGameStore = create<GameStore>((set, get) => ({
       ...initialState,
       currentLevelId: levelId,
       temperature: level.initialTemp,
+    });
+  },
+
+  startPractice: (config: PracticeConfig, decisions: Decision[], title?: string) => {
+    const level = getLevelById(config.levelId);
+    if (!level) return;
+
+    const practiceTitle = title || config.mode === 'random'
+      ? `${level.name} - 突发情况专项练习`
+      : config.mode === 'scene'
+      ? `${level.name} - ${level.scenes.find(s => s.id === config.sceneId)?.name || ''}专项练习`
+      : config.mode === 'wrong'
+      ? `${level.name} - 错题专项练习`
+      : level.name;
+
+    set({
+      ...initialState,
+      currentLevelId: config.levelId,
+      temperature: level.initialTemp,
+      practiceConfig: {
+        ...config,
+        title: practiceTitle,
+      },
+      practiceDecisions: decisions,
+      practiceCurrentIndex: 0,
     });
   },
 
@@ -107,6 +135,48 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
   },
 
+  selectPracticeOption: (option: Option, isTimeout: boolean = false) => {
+    const state = get();
+    const level = state.getCurrentLevel();
+    const decision = state.getCurrentPracticeDecision();
+
+    if (!level || !decision) return;
+
+    const sceneName = state.practiceConfig?.mode === 'random'
+      ? '突发情况'
+      : state.practiceConfig?.mode === 'scene'
+      ? level.scenes.find(s => s.id === state.practiceConfig?.sceneId)?.name || '专项练习'
+      : '错题练习';
+
+    const newTemp = Math.max(-20, Math.min(40, state.temperature + option.consequence.temperatureChange));
+    const newCompliance = Math.max(0, Math.min(100, state.complianceScore + option.consequence.complianceScore));
+    const newDamage = Math.max(0, Math.min(100, state.damageRisk + option.consequence.damageRisk));
+    const newComplaint = Math.max(0, Math.min(100, state.complaintRisk + option.consequence.complaintRisk));
+
+    const record: DecisionRecord = {
+      decisionId: decision.id,
+      decisionQuestion: decision.question,
+      selectedOptionId: option.id,
+      selectedOptionText: option.text,
+      isCorrect: option.isCorrect,
+      consequence: option.consequence,
+      timestamp: Date.now(),
+      sceneName,
+      isRandomEvent: state.practiceConfig?.mode === 'random' || decision.isRandomEvent || false,
+      isTimeout,
+    };
+
+    set({
+      temperature: newTemp,
+      complianceScore: newCompliance,
+      damageRisk: newDamage,
+      complaintRisk: newComplaint,
+      decisionHistory: [...state.decisionHistory, record],
+      showFeedback: true,
+      lastFeedback: isTimeout ? '⏰ 时间到！' + option.consequence.feedback : option.consequence.feedback,
+    });
+  },
+
   nextDecision: () => {
     const state = get();
     const level = state.getCurrentLevel();
@@ -132,6 +202,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
       } else {
         set({ isGameOver: true });
       }
+    }
+  },
+
+  nextPracticeDecision: () => {
+    const state = get();
+    const nextIndex = state.practiceCurrentIndex + 1;
+
+    set({
+      showFeedback: false,
+      lastFeedback: null,
+    });
+
+    if (nextIndex < state.practiceDecisions.length) {
+      set({ practiceCurrentIndex: nextIndex });
+    } else {
+      set({ isGameOver: true });
     }
   },
 
@@ -181,6 +267,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     return getLevelById(state.currentLevelId);
   },
 
+  getCurrentPracticeDecision: () => {
+    const state = get();
+    return state.practiceDecisions[state.practiceCurrentIndex];
+  },
+
   calculateResult: (): GameResult => {
     const state = get();
     const level = state.getCurrentLevel();
@@ -225,9 +316,57 @@ export const useGameStore = create<GameStore>((set, get) => ({
     };
   },
 
+  calculatePracticeResult: (): GameResult => {
+    const state = get();
+    const level = state.getCurrentLevel();
+    const practiceTitle = state.practiceConfig?.title || '专项练习';
+
+    if (!level) {
+      return {
+        levelId: '',
+        levelName: practiceTitle,
+        complianceScore: 0,
+        damageRisk: 0,
+        complaintRisk: 0,
+        decisionHistory: [],
+        keyLearnings: [],
+        overallRating: 'fail',
+      };
+    }
+
+    let rating: 'excellent' | 'good' | 'pass' | 'fail';
+    if (state.complianceScore >= 90) rating = 'excellent';
+    else if (state.complianceScore >= 75) rating = 'good';
+    else if (state.complianceScore >= 60) rating = 'pass';
+    else rating = 'fail';
+
+    const keyLearnings = state.decisionHistory
+      .filter(record => !record.isCorrect)
+      .map(record => record.consequence.explanation)
+      .slice(0, 5);
+
+    if (keyLearnings.length === 0) {
+      keyLearnings.push('太棒了！你完美完成了本次专项练习！');
+      keyLearnings.push('继续保持，你已经掌握了这些知识点！');
+    }
+
+    return {
+      levelId: level.id,
+      levelName: practiceTitle,
+      complianceScore: state.complianceScore,
+      damageRisk: state.damageRisk,
+      complaintRisk: state.complaintRisk,
+      decisionHistory: state.decisionHistory,
+      keyLearnings,
+      overallRating: rating,
+    };
+  },
+
   saveResultToStorage: () => {
     const state = get();
-    const result = state.calculateResult();
+    const result = state.practiceConfig
+      ? state.calculatePracticeResult()
+      : state.calculateResult();
     if (result.levelId) {
       try {
         localStorage.setItem(GAME_RESULT_STORAGE_KEY, JSON.stringify(result));

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Home, RotateCcw, ChevronDown, ChevronUp, Trophy, AlertTriangle, CheckCircle, XCircle, Zap, Clock } from 'lucide-react';
+import { Home, RotateCcw, ChevronDown, ChevronUp, Trophy, AlertTriangle, CheckCircle, XCircle, Zap, Clock, Thermometer, Minus, Plus, ListOrdered } from 'lucide-react';
 import { useGameStore, getBestScores, saveBestScore } from '../store/useGameStore';
 import { getLevelById } from '../data/levels';
 import { Gauge } from '../components/ui/Gauge';
@@ -114,6 +114,21 @@ export const Result = () => {
     return groups;
   }, {} as Record<string, DecisionRecord[]>);
 
+  const sortedTimeline = [...result.decisionHistory].sort((a, b) => a.timestamp - b.timestamp);
+
+  const getSceneStep = (record: DecisionRecord): { step: number; name: string; icon: string } => {
+    if (record.isRandomEvent) {
+      return { step: -1, name: '突发情况', icon: '⚡' };
+    }
+    const sceneOrder: Record<string, { step: number; icon: string }> = {
+      '装车前准备': { step: 1, icon: '📦' },
+      '途中行驶': { step: 2, icon: '🚚' },
+      '门店交接': { step: 3, icon: '🏪' },
+    };
+    const info = sceneOrder[record.sceneName] || { step: 0, icon: '📋' };
+    return { step: info.step, name: record.sceneName, icon: info.icon };
+  };
+
   const correctCount = result.decisionHistory.filter(r => r.isCorrect).length;
   const totalCount = result.decisionHistory.length;
 
@@ -212,6 +227,166 @@ export const Result = () => {
         </div>
 
         <div className="bg-white rounded-3xl shadow-xl p-6 md:p-8 mb-8 animate-slide-up" style={{ animationDelay: '100ms' }}>
+          <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+            <ListOrdered className="text-cold-500" size={24} />
+            🕐 配送复盘时间线
+          </h2>
+          <div className="relative">
+            <div className="absolute left-6 top-0 bottom-0 w-1 bg-gradient-to-b from-cold-200 via-blue-300 to-green-200 rounded-full" />
+            <div className="space-y-6">
+              {sortedTimeline.map((record, index) => {
+                const sceneInfo = getSceneStep(record);
+                const key = record.decisionId + '_' + record.timestamp;
+                const isExpanded = expandedItems.has('timeline_' + key);
+                return (
+                  <div key={key} className="relative pl-16 animate-slide-up" style={{ animationDelay: `${index * 50}ms` }}>
+                    <div className={`absolute left-2 top-1 w-10 h-10 rounded-full flex items-center justify-center shadow-lg border-4 ${
+                      record.isRandomEvent
+                        ? 'bg-orange-500 border-orange-100'
+                        : sceneInfo.step === 1
+                        ? 'bg-blue-500 border-blue-100'
+                        : sceneInfo.step === 2
+                        ? 'bg-purple-500 border-purple-100'
+                        : sceneInfo.step === 3
+                        ? 'bg-green-500 border-green-100'
+                        : 'bg-gray-500 border-gray-100'
+                    }`}>
+                      <span className="text-lg">
+                        {record.isRandomEvent ? '⚡' : sceneInfo.icon}
+                      </span>
+                    </div>
+                    <div className={`rounded-2xl border-2 overflow-hidden transition-all ${
+                      record.isRandomEvent
+                        ? record.isCorrect
+                          ? 'border-orange-200 bg-gradient-to-br from-orange-50 to-yellow-50'
+                          : 'border-orange-300 bg-gradient-to-br from-orange-50 to-red-50'
+                        : record.isCorrect
+                        ? 'border-green-200 bg-gradient-to-br from-green-50 to-emerald-50'
+                        : 'border-red-200 bg-gradient-to-br from-red-50 to-rose-50'
+                    }`}>
+                      <button
+                        onClick={() => toggleExpand('timeline_' + key)}
+                        className="w-full p-5 flex items-start justify-between text-left hover:bg-black/5 transition-colors"
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 flex-wrap mb-2">
+                            <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold ${
+                              record.isRandomEvent
+                                ? 'bg-orange-200 text-orange-800'
+                                : sceneInfo.step === 1
+                                ? 'bg-blue-200 text-blue-800'
+                                : sceneInfo.step === 2
+                                ? 'bg-purple-200 text-purple-800'
+                                : 'bg-green-200 text-green-800'
+                            }`}>
+                              {sceneInfo.name}
+                            </span>
+                            {record.isRandomEvent && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-orange-500 text-white text-xs rounded-full font-medium">
+                                <Zap size={12} />
+                                突发
+                              </span>
+                            )}
+                            {record.isTimeout && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-500 text-white text-xs rounded-full font-medium">
+                                <Clock size={12} />
+                                超时
+                              </span>
+                            )}
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                              record.isCorrect
+                                ? 'bg-green-500 text-white'
+                                : 'bg-red-500 text-white'
+                            }`}>
+                              {record.isCorrect ? <CheckCircle size={12} /> : <XCircle size={12} />}
+                              {record.isCorrect ? '正确' : '错误'}
+                            </span>
+                          </div>
+                          <h4 className="font-bold text-gray-800 mb-1">{record.decisionQuestion}</h4>
+                          <p className="text-sm text-gray-600">
+                            <span className="font-medium">选择：</span>{record.selectedOptionText}
+                          </p>
+                          <div className="flex items-center gap-4 mt-2 flex-wrap text-xs">
+                            {record.consequence.complianceScore !== 0 && (
+                              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md font-medium ${
+                                record.consequence.complianceScore > 0
+                                  ? 'bg-green-100 text-green-700'
+                                  : 'bg-red-100 text-red-700'
+                              }`}>
+                                合规分 {record.consequence.complianceScore > 0 ? '+' : ''}{record.consequence.complianceScore}
+                              </span>
+                            )}
+                            {record.consequence.temperatureChange !== 0 && (
+                              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md font-medium ${
+                                record.consequence.temperatureChange > 0
+                                  ? 'bg-orange-100 text-orange-700'
+                                  : 'bg-blue-100 text-blue-700'
+                              }`}>
+                                <Thermometer size={12} />
+                                温度 {record.consequence.temperatureChange > 0 ? '+' : ''}{record.consequence.temperatureChange}℃
+                              </span>
+                            )}
+                            {record.consequence.damageRisk !== 0 && (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md font-medium bg-yellow-100 text-yellow-700">
+                                货损风险 {record.consequence.damageRisk > 0 ? '+' : ''}{record.consequence.damageRisk}
+                              </span>
+                            )}
+                            {record.consequence.complaintRisk !== 0 && (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md font-medium bg-rose-100 text-rose-700">
+                                投诉风险 {record.consequence.complaintRisk > 0 ? '+' : ''}{record.consequence.complaintRisk}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="ml-4 flex-shrink-0">
+                          {isExpanded ? (
+                            <ChevronUp size={20} className="text-gray-400" />
+                          ) : (
+                            <ChevronDown size={20} className="text-gray-400" />
+                          )}
+                        </div>
+                      </button>
+                      {isExpanded && (
+                        <div className="px-5 pb-5 pt-0">
+                          <div className="p-4 bg-white rounded-xl border border-gray-200">
+                            <div className="space-y-3">
+                              <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+                                <h5 className="font-bold text-blue-800 mb-1 flex items-center gap-2">
+                                  💡 知识点解释
+                                </h5>
+                                <p className="text-blue-700 leading-relaxed">
+                                  {record.consequence.explanation}
+                                </p>
+                              </div>
+                              {!record.isCorrect && (
+                                <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                                  <p className="text-yellow-800">
+                                    <strong className="flex items-center gap-1">
+                                      <CheckCircle size={16} className="text-green-600" />
+                                      正确做法：
+                                    </strong>
+                                    <span className="block mt-1 text-yellow-700">{getCorrectOptionText(record.decisionId)}</span>
+                                  </p>
+                                </div>
+                              )}
+                              <div className="p-3 bg-gray-50 rounded-lg">
+                                <p className="text-sm text-gray-600">
+                                  <strong>反馈：</strong>{record.consequence.feedback}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-3xl shadow-xl p-6 md:p-8 mb-8 animate-slide-up" style={{ animationDelay: '200ms' }}>
           <h2 className="text-xl font-bold text-gray-800 mb-6">
             📝 决策明细
           </h2>
