@@ -1,13 +1,14 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { ArrowRight, Home } from 'lucide-react';
 import { useGameStore, saveBestScore } from '../store/useGameStore';
-import { getLevelById } from '../data/levels';
+import { getLevelById, levels } from '../data/levels';
 import { SceneProgress } from '../components/game/SceneProgress';
 import { StatusBar } from '../components/game/StatusBar';
 import { DecisionCard } from '../components/game/DecisionCard';
-import { Option, PracticeConfig, PracticeMode, Decision } from '../types/game';
+import { Option, PracticeConfig, PracticeMode, Decision, GameResult } from '../types/game';
 import { addWrongQuestionsFromResult, markQuestionMastered, getWrongQuestions } from '../utils/wrongQuestions';
+import { buildTrainingReport, addTrainingReport } from '../utils/learningProfile';
 
 export const Game = () => {
   const { levelId } = useParams<{ levelId: string }>();
@@ -20,6 +21,7 @@ export const Game = () => {
   const [randomEventSelectedId, setRandomEventSelectedId] = useState<string | null>(null);
   const [showRandomEventFeedback, setShowRandomEventFeedback] = useState(false);
   const [isPracticeMode, setIsPracticeMode] = useState(false);
+  const startTimeRef = useRef<number>(Date.now());
 
   const {
     currentSceneIndex,
@@ -79,6 +81,8 @@ export const Game = () => {
     if (isPracticeRoute) {
       const mode = searchParams.get('mode') as PracticeMode | null;
       const sceneId = searchParams.get('sceneId') || undefined;
+      const sceneIdsStr = searchParams.get('sceneIds') || '';
+      const includeRandomStr = searchParams.get('includeRandom') || '';
       const wrongQuestionIdsStr = searchParams.get('wrongIds') || '';
 
       if (!mode) {
@@ -86,23 +90,59 @@ export const Game = () => {
         return;
       }
 
+      startTimeRef.current = Date.now();
+
       let practiceTitle = '';
       let selectedDecisions: Decision[] = [];
+      let configSceneIds: string[] | undefined;
+      let includeRandomEvents = false;
 
       if (mode === 'random') {
         practiceTitle = `${levelData.name} - 突发情况专项练习`;
         selectedDecisions = levelData.randomEvents;
-      } else if (mode === 'scene' && sceneId) {
-        const targetScene = levelData.scenes.find(s => s.id === sceneId);
-        if (targetScene) {
-          practiceTitle = `${levelData.name} - ${targetScene.name}专项练习`;
-          selectedDecisions = targetScene.decisions;
+        includeRandomEvents = true;
+      } else if (mode === 'scene') {
+        if (sceneId) {
+          const targetScene = levelData.scenes.find(s => s.id === sceneId);
+          if (targetScene) {
+            practiceTitle = `${levelData.name} - ${targetScene.name}专项练习`;
+            selectedDecisions = targetScene.decisions;
+            configSceneIds = [sceneId];
+          }
+        } else if (sceneIdsStr) {
+          const sceneIds = sceneIdsStr.split(',').filter(Boolean);
+          const targetScenes = levelData.scenes.filter(s => sceneIds.includes(s.id));
+          const sceneNames = targetScenes.map(s => s.name).join('+');
+          practiceTitle = `${levelData.name} - ${sceneNames}综合练习`;
+          selectedDecisions = targetScenes.flatMap(s => s.decisions);
+          configSceneIds = sceneIds;
+        }
+        if (includeRandomStr === 'true') {
+          selectedDecisions = [...selectedDecisions, ...levelData.randomEvents];
+          includeRandomEvents = true;
+          practiceTitle += '(含突发)';
         }
       } else if (mode === 'wrong') {
+        let wrongIds: string[] = [];
+        if (wrongQuestionIdsStr) {
+          wrongIds = wrongQuestionIdsStr.split(',').filter(Boolean);
+        } else {
+          const allLevelIds = levels.map(l => l.id);
+          const allWrongs = getWrongQuestions().filter(q => !q.mastered && allLevelIds.includes(q.levelId));
+          wrongIds = allWrongs.map(q => q.decision.id);
+        }
+        if (wrongIds.length === 0) {
+          alert('没有待复习的错题啦！');
+          navigate('/');
+          return;
+        }
         practiceTitle = `${levelData.name} - 错题专项练习`;
-        const wrongIds = wrongQuestionIdsStr.split(',').filter(Boolean);
         const allDecisions = [...levelData.scenes.flatMap(s => s.decisions), ...levelData.randomEvents];
-        selectedDecisions = allDecisions.filter(d => wrongIds.includes(d.id));
+        const levelsExtraDecisions = levels
+          .filter(l => l.id !== levelId)
+          .flatMap(l => [...l.scenes.flatMap(s => s.decisions), ...l.randomEvents]);
+        const fullPool = [...allDecisions, ...levelsExtraDecisions];
+        selectedDecisions = fullPool.filter(d => wrongIds.includes(d.id));
       }
 
       if (selectedDecisions.length === 0) {
@@ -114,10 +154,13 @@ export const Game = () => {
         mode,
         levelId,
         sceneId,
+        sceneIds: configSceneIds,
+        includeRandomEvents,
         title: practiceTitle,
       };
       startPractice(config, selectedDecisions, practiceTitle);
     } else {
+      startTimeRef.current = Date.now();
       startGame(levelId);
     }
 
@@ -128,6 +171,7 @@ export const Game = () => {
 
   useEffect(() => {
     if (isGameOver && levelId) {
+      const durationMs = Date.now() - startTimeRef.current;
       const result = practiceConfig
         ? calculatePracticeResult()
         : calculateResult();
@@ -145,8 +189,14 @@ export const Game = () => {
         const correctIds = result.decisionHistory
           .filter(r => r.isCorrect)
           .map(r => r.decisionId);
-        correctIds.forEach(id => markQuestionMastered(`${levelId}_${id}`));
+        const allLevelIds = levels.map(l => l.id);
+        getWrongQuestions()
+          .filter(q => allLevelIds.includes(q.levelId) && correctIds.includes(q.decision.id))
+          .forEach(q => markQuestionMastered(q.id));
       }
+
+      const report = buildTrainingReport(result, practiceConfig, durationMs);
+      addTrainingReport(report);
 
       saveResultToStorage();
       navigate(`/result/${levelId}`);

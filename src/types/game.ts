@@ -140,5 +140,62 @@ export interface PracticeConfig {
   mode: PracticeMode;
   levelId: string;
   sceneId?: string;
+  sceneIds?: string[];
+  includeRandomEvents?: boolean;
+  decisionIds?: string[];
   title?: string;
+}
+
+export interface TrainingReport {
+  id: string;
+  levelId: string;
+  levelName: string;
+  completedAt: string;
+  durationMs: number;
+  practiceConfig: PracticeConfig | null;
+  complianceScore: number;
+  damageRisk: number;
+  complaintRisk: number;
+  overallRating: 'excellent' | 'good' | 'pass' | 'fail';
+  totalQuestions: number;
+  correctCount: number;
+  wrongCount: number;
+  accuracy: number;
+  decisionHistory: DecisionRecord[];
+  sceneStats: SceneStat[];
+  keyLearnings: string[];
+  improvementSuggestions: string[];
+  weakScenes: string[];
+}
+
+export interface SceneStat {
+  sceneName: string;
+  total: number;
+  correct: number;
+  accuracy: number;
+  complianceDelta: number;
+}
+
+export interface LevelProfile {
+  levelId: string;
+  levelName: string;
+  completionCount: number;
+  bestScore: number;
+  bestScoreDate: string;
+  lastScore: number;
+  lastDamageRisk: number;
+  lastComplaintRisk: number;
+  lastCompletedAt: string;
+  totalWrongQuestions: number;
+  masteredWrongQuestions: number;
+  unmasteredWrongQuestions: number;
+  masteryProgress: number;
+  avgAccuracy: number;
+}
+
+export interface LearningProfile {
+  updatedAt: string;
+  totalTrainingTime: number;
+  reports: TrainingReport[];
+  levelProfiles: Record<string, LevelProfile>;
 }

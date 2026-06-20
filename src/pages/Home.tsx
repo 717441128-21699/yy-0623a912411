@@ -1,20 +1,25 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Truck, Thermometer, Package, CheckCircle, Trophy, ArrowRight, BookOpen, Zap, MapPin, ChevronRight, XCircle } from 'lucide-react';
+import { Truck, Thermometer, Package, CheckCircle, Trophy, ArrowRight, BookOpen, Zap, MapPin, ChevronRight, XCircle, User, BarChart3, TrendingUp, TrendingDown, Clock, Target } from 'lucide-react';
 import { levels, getDifficultyLabel, getDifficultyColor } from '../data/levels';
 import { getBestScores } from '../store/useGameStore';
-import { BestScores } from '../types/game';
+import { BestScores, LevelProfile } from '../types/game';
 import { getUnmasteredCount, getWrongQuestions } from '../utils/wrongQuestions';
+import { getAllLevelProfiles, refreshLevelProfiles, getRecentReports } from '../utils/learningProfile';
+import { getRiskColor } from '../utils/scoring';
 
 export const Home = () => {
   const navigate = useNavigate();
   const [bestScores, setBestScores] = useState<BestScores>({});
   const [wrongCount, setWrongCount] = useState(0);
   const [expandedLevel, setExpandedLevel] = useState<string | null>(null);
+  const [levelProfiles, setLevelProfiles] = useState<Record<string, LevelProfile>>({});
 
   useEffect(() => {
     setBestScores(getBestScores());
     setWrongCount(getUnmasteredCount());
+    refreshLevelProfiles();
+    setLevelProfiles(getAllLevelProfiles());
   }, []);
 
   const handleStartGame = (levelId: string) => {
@@ -54,7 +59,16 @@ export const Home = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-cold-50 via-white to-ice-50">
       <div className="container mx-auto px-4 py-8 md:py-16">
-        <div className="flex justify-end mb-8 animate-fade-in">
+        <div className="flex justify-end gap-3 mb-8 animate-fade-in flex-wrap">
+          <button
+            onClick={() => navigate('/learning-profile')}
+            className="flex items-center gap-2 px-5 py-3 bg-white border-2 border-cyan-200 rounded-2xl shadow-md hover:shadow-lg hover:border-cyan-400 transition-all duration-300 group"
+          >
+            <User className="text-cyan-500 group-hover:text-cyan-600 transition-colors" size={24} />
+            <span className="font-bold text-gray-700 group-hover:text-cyan-600 transition-colors">
+              学习档案
+            </span>
+          </button>
           <button
             onClick={() => navigate('/wrong-book')}
             className="flex items-center gap-2 px-5 py-3 bg-white border-2 border-purple-200 rounded-2xl shadow-md hover:shadow-lg hover:border-purple-400 transition-all duration-300 group"
@@ -122,6 +136,149 @@ export const Home = () => {
               <p className="text-gray-600">{item.desc}</p>
             </div>
           ))}
+        </div>
+
+        <div className="mb-12 animate-slide-up">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+              <BarChart3 className="text-cyan-500" size={28} />
+              我的学习档案
+            </h2>
+            <button
+              onClick={() => navigate('/learning-profile')}
+              className="text-cyan-600 font-medium hover:text-cyan-700 flex items-center gap-1 text-sm"
+            >
+              查看全部
+              <ChevronRight size={16} />
+            </button>
+          </div>
+          <div className="grid md:grid-cols-2 gap-6">
+            {levels.map((level, index) => {
+              const profile = levelProfiles[level.id];
+              if (!profile) return null;
+              const hasData = profile.completionCount > 0;
+              return (
+                <div
+                  key={level.id}
+                  onClick={() => navigate(`/learning-profile/${level.id}`)}
+                  className="bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer border-2 border-transparent hover:border-cyan-200"
+                >
+                  <div className="flex items-center gap-4 mb-5">
+                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-3xl ${
+                      level.id === 'vaccine'
+                        ? 'bg-gradient-to-br from-blue-400 to-cold-500'
+                        : 'bg-gradient-to-br from-green-400 to-emerald-500'
+                    }`}>
+                      {level.icon}
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-bold text-lg text-gray-800">{level.name}</h3>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${getDifficultyColor(level.difficulty)} bg-gray-100`}>
+                          {getDifficultyLabel(level.difficulty)}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          已完成 {profile.completionCount} 次
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {hasData ? (
+                    <>
+                      <div className="grid grid-cols-3 gap-3 mb-5">
+                        <div className="text-center p-2 bg-yellow-50 rounded-lg">
+                          <Trophy size={18} className="text-yellow-500 mx-auto mb-1" />
+                          <p className="text-lg font-bold text-gray-800">{profile.bestScore}</p>
+                          <p className="text-xs text-gray-500">最高分</p>
+                        </div>
+                        <div className="text-center p-2 bg-cyan-50 rounded-lg">
+                          <Target size={18} className="text-cyan-500 mx-auto mb-1" />
+                          <p className="text-lg font-bold text-gray-800">{profile.avgAccuracy}%</p>
+                          <p className="text-xs text-gray-500">平均正确率</p>
+                        </div>
+                        <div className="text-center p-2 bg-purple-50 rounded-lg">
+                          <BookOpen size={18} className="text-purple-500 mx-auto mb-1" />
+                          <p className="text-lg font-bold text-gray-800">{profile.masteryProgress}%</p>
+                          <p className="text-xs text-gray-500">错题掌握</p>
+                        </div>
+                      </div>
+
+                      {profile.lastCompletedAt && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-gray-500 flex items-center gap-1">
+                              <Clock size={14} />
+                              最近完成
+                            </span>
+                            <span className="font-medium text-gray-700">
+                              {new Date(profile.lastCompletedAt).toLocaleDateString('zh-CN')}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-gray-500">最近合规分</span>
+                            <div className="flex items-center gap-1">
+                              <span className="font-bold text-gray-800">{profile.lastScore}</span>
+                              {profile.bestScore > 0 && profile.lastScore >= profile.bestScore ? (
+                                <TrendingUp size={14} className="text-green-500" />
+                              ) : profile.lastScore < profile.bestScore - 10 ? (
+                                <TrendingDown size={14} className="text-red-500" />
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-gray-500">风险变化</span>
+                            <div className="flex items-center gap-2">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getRiskColor(profile.lastDamageRisk)} bg-gray-100`}>
+                                货损 {profile.lastDamageRisk}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getRiskColor(profile.lastComplaintRisk)} bg-gray-100`}>
+                                投诉 {profile.lastComplaintRisk}
+                              </span>
+                            </div>
+                          </div>
+
+                          {profile.totalWrongQuestions > 0 && (
+                            <div className="mt-3">
+                              <div className="flex items-center justify-between text-xs mb-1">
+                                <span className="text-gray-500">错题掌握进度</span>
+                                <span className="text-gray-600 font-medium">
+                                  {profile.masteredWrongQuestions}/{profile.totalWrongQuestions}
+                                </span>
+                              </div>
+                              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-gradient-to-r from-purple-400 to-purple-600 rounded-full transition-all duration-500"
+                                  style={{ width: `${profile.masteryProgress}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-center py-6">
+                      <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                        <Target size={28} className="text-gray-400" />
+                      </div>
+                      <p className="text-gray-500 text-sm mb-3">还没有训练记录</p>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStartGame(level.id);
+                        }}
+                        className="text-cyan-600 font-medium text-sm hover:text-cyan-700 flex items-center gap-1 mx-auto"
+                      >
+                        开始第一次训练
+                        <ArrowRight size={14} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <div className="mb-8">
@@ -205,6 +362,24 @@ export const Home = () => {
                     {isExpanded && (
                       <div className="px-6 pb-6 animate-slide-up">
                         <div className="p-4 bg-gray-50 rounded-xl space-y-3">
+                          <button
+                            onClick={() => navigate(`/practice-builder/${level.id}`)}
+                            className="w-full p-4 bg-gradient-to-r from-purple-500 to-indigo-500 rounded-xl text-white hover:from-purple-600 hover:to-indigo-600 transition-all duration-300 text-left shadow-md shadow-purple-500/20 group"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center group-hover:bg-white/30 transition-colors">
+                                <Target className="text-white" size={24} />
+                              </div>
+                              <div className="flex-1">
+                                <p className="font-bold">自定义组合练习</p>
+                                <p className="text-sm text-white/80">自主勾选多个场景和突发情况组一套题</p>
+                              </div>
+                              <ChevronRight size={20} className="text-white/80 group-hover:text-white group-hover:translate-x-1 transition-all" />
+                            </div>
+                          </button>
+
+                          <div className="h-px bg-gray-200 my-1" />
+
                           <button
                             onClick={() => handleStartPractice(level.id, 'random')}
                             className="w-full p-4 bg-white rounded-xl border-2 border-orange-200 hover:border-orange-400 hover:bg-orange-50 transition-all duration-300 text-left group"

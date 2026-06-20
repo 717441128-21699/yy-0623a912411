@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Home, RotateCcw, ChevronDown, ChevronUp, Trophy, AlertTriangle, CheckCircle, XCircle, Zap, Clock, Thermometer, Minus, Plus, ListOrdered } from 'lucide-react';
+import { Home, RotateCcw, ChevronDown, ChevronUp, Trophy, AlertTriangle, CheckCircle, XCircle, Zap, Clock, Thermometer, Minus, Plus, ListOrdered, FileText, Target, ArrowRight, BarChart3, Lightbulb, Share2 } from 'lucide-react';
 import { useGameStore, getBestScores, saveBestScore } from '../store/useGameStore';
 import { getLevelById } from '../data/levels';
 import { Gauge } from '../components/ui/Gauge';
@@ -11,7 +11,8 @@ import {
   getRiskColor,
   getRiskLabel,
 } from '../utils/scoring';
-import { DecisionRecord, GameResult } from '../types/game';
+import { DecisionRecord, GameResult, Level } from '../types/game';
+import { calculateSceneStats, generateImprovementSuggestions, getRecentReports, getPracticeSuggestions } from '../utils/learningProfile';
 
 export const Result = () => {
   const { levelId } = useParams<{ levelId: string }>();
@@ -21,7 +22,7 @@ export const Result = () => {
   const [isNewBest, setIsNewBest] = useState(false);
   const [loadedFromStorage, setLoadedFromStorage] = useState(false);
 
-  const { calculateResult, startGame, resetGame, getResultFromStorage, clearResultFromStorage } = useGameStore();
+  const { calculateResult, startGame, resetGame, getResultFromStorage, clearResultFromStorage, practiceConfig } = useGameStore();
 
   useEffect(() => {
     if (!levelId) {
@@ -131,6 +132,49 @@ export const Result = () => {
 
   const correctCount = result.decisionHistory.filter(r => r.isCorrect).length;
   const totalCount = result.decisionHistory.length;
+  const accuracy = totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : 0;
+
+  const sceneStats = useMemo(() => calculateSceneStats(result.decisionHistory), [result]);
+  const improvementSuggestions = useMemo(() => generateImprovementSuggestions(result, sceneStats), [result, sceneStats]);
+  const weakScenes = useMemo(() => sceneStats.filter(s => s.accuracy < 60).map(s => s.sceneName), [sceneStats]);
+  const practiceSuggestions = useMemo(() => levelId ? getPracticeSuggestions(levelId, weakScenes).slice(0, 3) : [], [levelId, weakScenes]);
+  const latestReportId = useMemo(() => {
+    const reports = levelId ? getRecentReports(5).filter(r => r.levelId === levelId) : [];
+    return reports[0]?.id;
+  }, [levelId, result]);
+
+  const handleShareReport = () => {
+    const text =
+`📋 冷链温控训练报告
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📦 任务: ${result.levelName}
+🏆 评级: ${getRatingLabel(result.overallRating)}
+📊 合规分: ${result.complianceScore}/100
+✅ 正确率: ${accuracy}% (${correctCount}/${totalCount})
+⚠️ 货损风险: ${result.damageRisk}
+📣 投诉风险: ${result.complaintRisk}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+关键知识点:
+${result.keyLearnings.slice(0, 3).map((k, i) => `${i + 1}. ${k}`).join('\n')}`;
+    try {
+      navigator.clipboard.writeText(text);
+      alert('报告已复制到剪贴板！');
+    } catch {
+      alert('复制失败，请手动复制');
+    }
+  };
+
+  const handleStartSuggestion = (idx: number) => {
+    const sugg = practiceSuggestions[idx];
+    if (!sugg || !levelId) return;
+    const params = new URLSearchParams();
+    params.set('mode', sugg.config.mode);
+    if (sugg.config.sceneIds && sugg.config.sceneIds.length > 0) params.set('sceneIds', sugg.config.sceneIds.join(','));
+    if (sugg.config.sceneId) params.set('sceneId', sugg.config.sceneId);
+    if (sugg.config.decisionIds && sugg.config.decisionIds.length > 0) params.set('wrongIds', sugg.config.decisionIds.join(','));
+    if (sugg.config.includeRandomEvents) params.set('includeRandom', 'true');
+    navigate(`/practice/${levelId}?${params.toString()}`);
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cold-50 via-white to-ice-50 py-8">
@@ -208,23 +252,120 @@ export const Result = () => {
           </div>
 
           <div className="mt-8 p-4 bg-gray-50 rounded-xl">
-            <div className="flex items-center justify-center gap-4 text-sm">
+            <div className="flex items-center justify-center gap-4 text-sm flex-wrap">
               <div className="flex items-center gap-2">
                 <CheckCircle size={18} className="text-green-500" />
                 <span className="text-gray-600">正确: {correctCount}</span>
               </div>
-              <div className="w-px h-6 bg-gray-300" />
+              <div className="w-px h-6 bg-gray-300 hidden sm:block" />
               <div className="flex items-center gap-2">
                 <XCircle size={18} className="text-red-500" />
                 <span className="text-gray-600">错误: {totalCount - correctCount}</span>
               </div>
-              <div className="w-px h-6 bg-gray-300" />
+              <div className="w-px h-6 bg-gray-300 hidden sm:block" />
               <div className="flex items-center gap-2">
-                <span className="text-gray-600">正确率: {Math.round((correctCount / totalCount) * 100)}%</span>
+                <Target size={18} className="text-cyan-500" />
+                <span className="text-gray-600 font-bold">正确率: {accuracy}%</span>
               </div>
             </div>
           </div>
+
+          {practiceConfig && (
+            <div className="mt-6 p-4 bg-purple-50 rounded-2xl border border-purple-100">
+              <h4 className="font-bold text-purple-800 mb-3 flex items-center gap-2">
+                <Target size={20} />
+                本次专项练习表现
+              </h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {sceneStats.map(stat => (
+                  <div key={stat.sceneName} className="bg-white p-3 rounded-xl">
+                    <p className="text-xs text-gray-500 mb-1 truncate">{stat.sceneName}</p>
+                    <p className={`text-lg font-bold ${
+                      stat.accuracy >= 80 ? 'text-green-600' :
+                      stat.accuracy >= 60 ? 'text-yellow-600' : 'text-red-600'
+                    }`}>
+                      {stat.accuracy}%
+                    </p>
+                    <p className="text-xs text-gray-400">{stat.correct}/{stat.total}题</p>
+                  </div>
+                ))}
+              </div>
+              {weakScenes.length > 0 && (
+                <p className="mt-3 text-sm text-purple-700 flex items-center gap-1">
+                  <AlertTriangle size={16} />
+                  薄弱环节: {weakScenes.join('、')}，建议下方专项练习强化
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            {latestReportId && (
+              <button
+                onClick={() => navigate(`/report/${latestReportId}`)}
+                className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-xl font-medium shadow-md shadow-cyan-500/30 hover:from-cyan-600 hover:to-blue-600 transition-all"
+              >
+                <FileText size={20} />
+                查看详细训练报告
+              </button>
+            )}
+            <button
+              onClick={handleShareReport}
+              className="flex items-center gap-2 px-5 py-3 bg-white border-2 border-gray-200 text-gray-700 rounded-xl font-medium hover:border-cyan-300 hover:text-cyan-700 transition-all"
+            >
+              <Share2 size={20} />
+              复制分享
+            </button>
+          </div>
         </div>
+
+        {improvementSuggestions.length > 0 && (
+          <div className="bg-white rounded-3xl shadow-xl p-6 md:p-8 mb-8 animate-slide-up" style={{ animationDelay: '80ms' }}>
+            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <Lightbulb className="text-yellow-500" size={24} />
+              💡 教练改进建议
+            </h2>
+            <div className="space-y-2">
+              {improvementSuggestions.map((sugg, idx) => (
+                <div key={idx} className="p-4 bg-gradient-to-r from-yellow-50 to-orange-50 rounded-xl border border-yellow-200">
+                  <div className="flex items-start gap-3">
+                    <span className="w-7 h-7 bg-yellow-500 text-white rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
+                      {idx + 1}
+                    </span>
+                    <p className="text-gray-700 leading-relaxed pt-0.5">{sugg}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {practiceSuggestions.length > 0 && (
+          <div className="bg-white rounded-3xl shadow-xl p-6 md:p-8 mb-8 animate-slide-up" style={{ animationDelay: '90ms' }}>
+            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <Zap className="text-orange-500" size={24} />
+              💪 推荐下一组练习
+            </h2>
+            <div className="grid md:grid-cols-3 gap-4">
+              {practiceSuggestions.map((sugg, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleStartSuggestion(idx)}
+                  className="p-5 bg-gradient-to-br from-orange-50 to-yellow-50 rounded-2xl border-2 border-orange-100 hover:border-orange-300 hover:shadow-md transition-all duration-300 text-left group"
+                >
+                  <h4 className="font-bold text-lg text-gray-800 mb-1">{sugg.title}</h4>
+                  <p className="text-sm text-gray-600 mb-3">{sugg.description}</p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-orange-600 font-medium text-sm flex items-center gap-1 group-hover:gap-2 transition-all">
+                      开始练习 <ArrowRight size={16} />
+                    </span>
+                    <span className="text-xs text-gray-400">{sugg.decisions.length}题</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="bg-white rounded-3xl shadow-xl p-6 md:p-8 mb-8 animate-slide-up" style={{ animationDelay: '100ms' }}>
           <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
